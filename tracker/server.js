@@ -15,6 +15,7 @@ redis.connect().then(function(){ console.log('[redis] connected'); }).catch(func
 
 function sha256(v){ if(!v) return undefined; return crypto.createHash('sha256').update(String(v).trim().toLowerCase()).digest('hex'); }
 function digits(v){ return v ? String(v).replace(/[^0-9]/g,'') : undefined; }
+function norm(v){ return v ? String(v).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'') : undefined; }
 function clean(o){ var r={}; for(var k in o){ var x=o[k]; if(x!==undefined && x!==null && x!=='') r[k]=x; } return r; }
 function validSck(s){ return typeof s==='string' && /^[A-Za-z0-9_-]{8,64}$/.test(s); }
 
@@ -59,6 +60,7 @@ const server = http.createServer(async function(req,res){
     var parts = String(fullName||'').trim().split(/\s+/).filter(Boolean);
     var firstName = cust.first_name || parts[0]; var lastName = parts.length>1 ? parts.slice(1).join(' ') : undefined;
     var custIp = cust.ip;
+    var city = cust.city; var state = cust.state; var zip = cust.zipcode || cust.zip; var cpf = cust.CPF || cust.cpf;
     var prod = b.Product || b.product || {};
     var productId = prod.product_id || prod.id;
     var productName = prod.product_name || prod.name;
@@ -74,6 +76,11 @@ const server = http.createServer(async function(req,res){
       ph: phone? [sha256(digits(phone))] : undefined,
       fn: firstName? [sha256(firstName)] : undefined,
       ln: lastName? [sha256(lastName)] : undefined,
+      ct: city? [sha256(norm(city))] : undefined,
+      st: state? [sha256(norm(state))] : undefined,
+      zp: zip? [sha256(digits(zip))] : undefined,
+      country: [sha256('br')],
+      external_id: cpf? [sha256(digits(cpf))] : undefined,
       client_ip_address: rec.ip || custIp,
       client_user_agent: rec.ua,
       fbc: rec.fbc,
