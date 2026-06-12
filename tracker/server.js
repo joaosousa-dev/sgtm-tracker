@@ -86,7 +86,7 @@ const server = http.createServer(async function(req,res){
       event_id: order_id || sck,
       action_source: 'website',
       user_data: user_data,
-      custom_data: clean({ currency:'BRL', value:value, content_ids: productId?[productId]:undefined, content_name: productName, content_type:'product', order_id:order_id })
+      custom_data: clean({ currency:'BRL', value:value, content_ids: productId?[productId]:undefined, content_name: productName, content_type:'product', order_id:order_id, product_id: productId })
     };
 
     if(!CAPI_TOKEN || !PIXEL_ID){ console.error('[webhook] missing pixel/token'); return send(res,200,{received:true, capi:'skipped_no_token', event:event}); }
