@@ -1,0 +1,20 @@
+{$SGTM_DOMAIN} {
+	@gtmpreview header X-Gtm-Server-Preview *
+	@tracker path /sck /webhook/kiwify /tracker-health
+	handle @gtmpreview {
+		reverse_proxy sgtm-preview:8081
+	}
+	handle /gtm/debug* {
+		reverse_proxy sgtm-preview:8081
+	}
+	handle @tracker {
+		reverse_proxy tracker:3000
+	}
+	handle {
+		reverse_proxy sgtm:8080
+	}
+}
+
+serverpreview.ojoaooliveira.com.br {
+	reverse_proxy sgtm-preview:8081
+}
