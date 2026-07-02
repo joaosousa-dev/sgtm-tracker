@@ -48,6 +48,8 @@ services:
       PIXEL_ID: ${PIXEL_ID}
       CAPI_TOKEN: ${CAPI_TOKEN}
       REDIS_URL: redis://redis:6379
+      SHEETS_URL: ${SHEETS_URL}
+      SHEETS_SECRET: ${SHEETS_SECRET}
     depends_on:
       - redis
     expose:

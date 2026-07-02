@@ -96,6 +96,42 @@ const server = http.createServer(async function(req,res){
       custom_data: clean({ currency:'BRL', value:value, content_ids: productId?[productId]:undefined, content_name: productName, content_type:'product', order_id:order_id, product_id: productId })
     };
 
+    // --- Google Sheets (via Apps Script Web App) — dispara em paralelo, não bloqueia o CAPI ---
+    // Preenche SÓ as 23 colunas de dados brutos (A-W) da aba VENDAS; valores em CENTAVOS
+    // (a planilha divide por 100 e calcula bruto/líquido/origem/tipo via fórmula nas colunas X-AK).
+    if(process.env.SHEETS_URL){
+      var sheetRow = {
+        secret: process.env.SHEETS_SECRET || '',
+        order_id: order_id || '',
+        order_ref: b.order_ref || '',
+        approved_date: b.approved_date || b.created_at || '',
+        order_status: b.order_status || '',
+        payment_method: b.payment_method || '',
+        product_name: productName || '',
+        product_id: productId || '',
+        charge_amount_cents: comm.charge_amount!=null ? comm.charge_amount : (amount!=null?amount:''),
+        kiwify_fee_cents: comm.kiwify_fee!=null ? comm.kiwify_fee : '',
+        my_commission_cents: comm.my_commission!=null ? comm.my_commission : '',
+        funds_status: comm.funds_status || '',
+        cliente_nome: fullName || '',
+        cliente_email: email || '',
+        cliente_telefone: phone || '',
+        cliente_cpf: cpf || '',
+        cliente_pais: cust.country || '',
+        sck: sck || '',
+        utm_source: rec.utm_source || '',
+        utm_medium: rec.utm_medium || '',
+        utm_campaign: rec.utm_campaign || '',
+        utm_content: rec.utm_content || '',
+        utm_term: rec.utm_term || '',
+        fbclid: rec.fbclid || ''
+      };
+      fetch(process.env.SHEETS_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(sheetRow) })
+        .then(function(r){ return r.text(); })
+        .then(function(t){ console.log('[sheets]', String(t).slice(0,200)); })
+        .catch(function(e){ console.error('[sheets] fail', e.message); });
+    }
+
     if(!CAPI_TOKEN || !PIXEL_ID){ console.error('[webhook] missing pixel/token'); return send(res,200,{received:true, capi:'skipped_no_token', event:event}); }
     try{
       var resp = await fetch(GRAPH + '?access_token=' + encodeURIComponent(CAPI_TOKEN), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({data:[event]}) });
