@@ -1,14 +1,21 @@
 /**
- * Recebe uma venda do servidor de tracking (server.js → webhook Kiwify) e grava
- * na aba VENDAS do Painel_Infoprodutos. Preenche SÓ as colunas de dados brutos;
- * as colunas de fórmula (Valor Bruto R$, Origem, Tipo, Mês, _bump...) são preservadas
- * (copia a fórmula da linha de cima quando a linha ainda não tem — passa de 500 vendas).
+ * Recebe uma venda OU um reembolso do servidor de tracking (server.js → webhook Kiwify)
+ * e grava na aba VENDAS do Painel_Infoprodutos.
+ *
+ * UPSERT por order_id:
+ *  - order_id NOVO  → APPEND (nova linha) e replica as fórmulas da linha de cima.
+ *  - order_id EXISTE → UPDATE da linha original (reembolso, mudança de status pix→paid,
+ *    funds_status, etc.) — sobrescreve só os campos que vieram preenchidos no webhook,
+ *    NÃO cria linha duplicada e NÃO toca nas colunas de fórmula.
+ *
+ * Preenche SÓ as colunas de dados brutos; as colunas de fórmula (Valor Bruto R$, Origem,
+ * Tipo, Mês, _bump...) são preservadas.
  *
  * DEPLOY:
- * 1. Planilha → Extensões → Apps Script → cola este código (substitui tudo).
+ * 1. Planilha → Extensões → Apps Script → cola este código (substitui tudo) → salvar.
  * 2. Ajuste SECRET abaixo (mesmo valor da env SHEETS_SECRET no servidor).
- * 3. Implantar → Nova implantação → App da Web → Executar como: Eu | Acesso: Qualquer pessoa.
- * 4. Autorize e copie a URL /exec → vai na env SHEETS_URL do servidor.
+ * 3. Implantar → Gerenciar implantações → (editar a implantação atual) → Versão: Nova versão
+ *    → Implantar.  Isso MANTÉM a mesma URL /exec (não precisa mexer no server).
  */
 
 const SHEET_NAME = '📥 VENDAS';               // nome exato da aba (confirmado)
@@ -50,7 +57,7 @@ function norm(s){
 function doPost(e){
   var lock = LockService.getScriptLock();
   try{
-    lock.waitLock(20000); // evita 2 vendas simultâneas escreverem na mesma linha
+    lock.waitLock(20000); // evita 2 webhooks simultâneos na mesma linha
     var body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     if(SECRET && body.secret !== SECRET) return json({ok:false, error:'unauthorized'});
 
@@ -60,26 +67,49 @@ function doPost(e){
     var lastCol = sh.getLastColumn();
     var headers = sh.getRange(1,1,1,lastCol).getValues()[0];
 
-    // próxima linha = após a última com order_id preenchido (col 1)
+    // mapeia cada coluna -> key (uma vez) e acha a coluna do order_id
+    var colKey = [];
+    var orderIdCol = 0;
+    for(var c=1;c<=lastCol;c++){
+      var k = HEADER_TO_KEY[norm(headers[c-1])];
+      colKey[c-1] = k;
+      if(k === 'order_id') orderIdCol = c;
+    }
+
+    // varre a coluna order_id: conta linhas preenchidas e procura o order_id deste webhook
     var maxRows = sh.getMaxRows();
-    var colA = sh.getRange(2,1,maxRows-1,1).getValues();
-    var count = 0;
-    for(var i=0;i<colA.length;i++){ if(String(colA[i][0]).trim() !== '') count++; }
-    var targetRow = 2 + count;
-    if(targetRow > maxRows){ sh.insertRowAfter(maxRows); }
+    var idVals = orderIdCol ? sh.getRange(2, orderIdCol, maxRows-1, 1).getValues() : [];
+    var wantId = String(body.order_id || '').trim();
+    var count = 0, foundRow = 0;
+    for(var i=0;i<idVals.length;i++){
+      var v = String(idVals[i][0]).trim();
+      if(v !== ''){
+        count++;
+        if(wantId !== '' && foundRow === 0 && v === wantId) foundRow = 2 + i;
+      }
+    }
+
+    var isUpdate  = foundRow > 0;                 // order_id já existe → atualiza
+    var targetRow = isUpdate ? foundRow : (2 + count);
+    if(!isUpdate && targetRow > maxRows){ sh.insertRowAfter(maxRows); }
 
     for(var c=1;c<=lastCol;c++){
-      var key = HEADER_TO_KEY[norm(headers[c-1])];
+      var key = colKey[c-1];
       var cell = sh.getRange(targetRow, c);
       if(key){
-        var v = (body[key] !== undefined && body[key] !== null) ? body[key] : '';
-        cell.setValue(v);
-      } else if(!cell.getFormula() && targetRow > 2){
-        // coluna de fórmula sem fórmula nesta linha → replica a de cima (ajusta refs)
+        if(isUpdate){
+          // update: só sobrescreve o que veio preenchido (não apaga dado com "")
+          if(body[key] !== undefined && body[key] !== null && body[key] !== '') cell.setValue(body[key]);
+        } else {
+          var v = (body[key] !== undefined && body[key] !== null) ? body[key] : '';
+          cell.setValue(v);
+        }
+      } else if(!isUpdate && !cell.getFormula() && targetRow > 2){
+        // append em coluna de fórmula sem fórmula nesta linha → replica a de cima
         sh.getRange(targetRow-1, c).copyTo(cell, {contentsOnly:false});
       }
     }
-    return json({ok:true, appended:true, row:targetRow});
+    return json({ok:true, mode: isUpdate ? 'updated' : 'appended', row:targetRow});
   }catch(err){
     return json({ok:false, error:String(err)});
   }finally{

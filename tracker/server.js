@@ -132,6 +132,14 @@ const server = http.createServer(async function(req,res){
         .catch(function(e){ console.error('[sheets] fail', e.message); });
     }
 
+    // Só dispara Purchase pro CAPI em COMPRA APROVADA. Reembolso/chargeback/pending
+    // atualizam a planilha (bloco acima) mas NÃO enviam conversão pro Meta — senão um
+    // refund dias depois (fora da janela de dedupe) contaria como 2ª venda.
+    var evType = String(b.webhook_event_type || b.event || '').toLowerCase();
+    var stLc   = String(b.order_status || order.status || '').toLowerCase();
+    var isPurchase = evType.indexOf('approved') >= 0 || stLc === 'paid' || stLc === 'approved';
+    if(!isPurchase){ console.log('[webhook] non-purchase event, skip CAPI:', evType || stLc || 'unknown'); return send(res,200,{received:true, capi:'skipped_non_purchase', kind: evType || stLc}); }
+
     if(!CAPI_TOKEN || !PIXEL_ID){ console.error('[webhook] missing pixel/token'); return send(res,200,{received:true, capi:'skipped_no_token', event:event}); }
     try{
       var resp = await fetch(GRAPH + '?access_token=' + encodeURIComponent(CAPI_TOKEN), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({data:[event]}) });
